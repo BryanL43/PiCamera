@@ -3,7 +3,7 @@ CC = gcc
 CXX = g++
 CFLAGS = -Wall -g -I./camera -I/usr/include/libcamera -I/usr/include/opencv4 -D USE_BCM2835_LIB
 CXXFLAGS = -Wall -g -I/usr/include/libcamera -I/usr/include/opencv4 -std=c++17
-LIBS = -lbcm2835 -lm -lstdc++ -lcamera -lopencv_core -lopencv_imgcodecs -lopencv_imgproc
+LIBS = -lbcm2835 -lm -lstdc++ -lcamera -lcamera-base -lopencv_core -lopencv_imgcodecs -lopencv_imgproc -lopencv_highgui
 
 # Directories
 OUTDIR = out

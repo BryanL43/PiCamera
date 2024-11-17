@@ -6,7 +6,7 @@
 
 #ifdef __cplusplus
 #include <iostream>
-#include <fstream>
+#include <sstream> // std::ostringstream
 #include <vector>
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 void* cameraInit();
-int captureFrame(void* cmHandle, uint8_t* buffer, size_t bufferSize);
+int captureFrame(void* cmHandle);
 void cameraTerminate(void* cmHandle);
 
 #ifdef __cplusplus
