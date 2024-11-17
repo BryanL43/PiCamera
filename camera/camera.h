@@ -8,6 +8,8 @@
 #include <iostream>
 #include <sstream> // std::ostringstream
 #include <vector>
+#include <future> // For the promise event
+#include <sys/mman.h> // mmap & munmap
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
 

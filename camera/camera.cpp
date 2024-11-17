@@ -1,13 +1,5 @@
 #include "camera.h"
 
-#include <future>
-#include <cstring>
-#include <memory>
-#include <fstream>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <fcntl.h>
-
 static std::promise<void> requestPromise;
 
 // Helper function to print metadata of a specific stream
