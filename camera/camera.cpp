@@ -158,7 +158,8 @@ int captureFrame(void* cmHandle) {
         return -13;
     }
 
-    // Access the Y, U, and V planes directly
+    // Access the Y, U, and V planes directly.
+    // IMPORTANT: Need to allocate buffer for all 3 frames or coloring will be messed up.
     const libcamera::FrameBuffer::Plane& y_plane = planes[0];
     const libcamera::FrameBuffer::Plane& u_plane = planes[1];
     const libcamera::FrameBuffer::Plane& v_plane = planes[2];
@@ -173,7 +174,7 @@ int captureFrame(void* cmHandle) {
         return -14;
     }
 
-    // Now you can access each plane by adding the appropriate aligned offset to the mapped buffer
+    // Accessing y_data only
     void* y_data = static_cast<uint8_t*>(buffer_data) + y_plane.offset;
 
     // YUV420 to BGR conversion using OpenCV
