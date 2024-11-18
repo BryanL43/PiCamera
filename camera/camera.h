@@ -10,8 +10,12 @@
 #include <vector>
 #include <future> // For the promise event
 #include <sys/mman.h> // mmap & munmap
+#include <thread> // sleep_for
+#include <chrono>
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
+
+#include "MapBuffer.h"
 
 using namespace libcamera;
 

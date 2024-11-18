@@ -1,9 +1,9 @@
 #include "camera.h"
 
-static std::promise<void> requestPromise;
+static std::shared_ptr<Camera> camera;
 
 // Helper function to print metadata of a specific stream
-std::string streamToString(Stream* stream) {
+std::string streamToString(libcamera::Stream* stream) {
     if (!stream) {
         return "Invalid stream";
     }
@@ -24,10 +24,62 @@ std::string streamToString(Stream* stream) {
     return oss.str();
 }
 
+static void renderFrame(const libcamera::FrameBuffer &buffer,
+                        const libcamera::StreamConfiguration &config) {
+    
+    // Acquire the first plane only
+    const libcamera::FrameBuffer::Plane &plane = buffer.planes().front();
+
+    try {
+        // Map the plane to memory for opencv
+        MapBuffer mappedBuffer(plane);
+        
+        // Convert the XRGB888 data to CV_8UC3 for opencv
+        int width = config.size.width;
+        int height = config.size.height;
+        cv::Mat image(height, width, CV_8UC4, mappedBuffer.data());
+
+        // Convert the XRGB888 to BGR
+        cv::Mat bgr_image;
+        cv::cvtColor(image, bgr_image, cv::COLOR_RGB2BGR);
+
+        // Save the image as a JPEG file
+        std::string output_filename = "captured_image.jpg";
+        bool result = cv::imwrite(output_filename, bgr_image);
+        if (result) {
+            std::cout << "Image saved as " << output_filename << std::endl;
+        } else {
+            std::cerr << "Failed to save image." << std::endl;
+        }
+
+    } catch (const std::exception &e) {
+        std::cerr << "Error rendering frame: " << e.what() << std::endl;
+    }
+}
+
 // Wait for camera request to be fulfilled
-static void requestComplete(Request *request) {
-    requestPromise.set_value();
-	std::cout << "Request Completed." << std::endl;
+static void requestComplete(libcamera::Request* request) {
+    if (request->status() == libcamera::Request::RequestCancelled) {
+        return;
+    }
+
+    // Map the request buffer containing the image's metadata and render the frame
+    const std::map<const libcamera::Stream*, libcamera::FrameBuffer*> &buffers =
+        request->buffers();
+    
+    for (auto &[stream, buffer] : buffers) {
+        if (buffer->metadata().status == libcamera::FrameMetadata::FrameSuccess) {
+            try {
+                renderFrame(*buffer, stream->configuration());
+            } catch (const std::exception &e) {
+                std::cerr << "Error trying to render frame: " << e.what() << std::endl;
+            }
+        }
+    }
+
+    //
+    request->reuse(libcamera::Request::ReuseBuffers);
+    camera->queueRequest(request);
 }
 
 // Camera initialization
@@ -58,7 +110,7 @@ int captureFrame(void* cmHandle) {
     }
 
     // Acquire only the first camera (only option we have) & put a lock on it
-    std::shared_ptr<Camera> camera = cameras.front();
+    camera = cameras.front();
     if (camera->acquire() != 0) {
         std::cerr << "Failed to acquire camera." << std::endl;
         return -3;
@@ -66,134 +118,83 @@ int captureFrame(void* cmHandle) {
     std::cout << "Acquired camera: " << camera->id() << std::endl;
 
     // Create configuration profile for the camera
-    std::unique_ptr<CameraConfiguration> config =
-        camera->generateConfiguration({StreamRole::StillCapture});
+    const std::unique_ptr<CameraConfiguration> config =
+        camera->generateConfiguration({ StreamRole::VideoRecording });
     if (!config) {
         std::cerr << "Failed to create config profile for camera: " << camera->id() << std::endl;
         return -4;
     }
-    std::cout << "Default configuration is: " << config->at(0).toString() << std::endl;
+    StreamConfiguration &streamConfig = config->at(0);
+    std::cout << "Default configuration is: " << streamConfig.toString() << std::endl;
 
     // Adjust & validate the new resolution
-    config->at(0).size = Size(640, 480);
+    streamConfig.size = Size(640, 480);
+    streamConfig.pixelFormat = libcamera::formats::XRGB8888;
     config->validate();
     if (camera->configure(config.get()) != 0) {
         std::cerr << "Failed to config camera: " << camera->id() << std::endl;
         return -5;
     }
-    std::cout << "Validated configuration is: " << config->at(0).toString() << std::endl;
+    std::cout << "Selected configuration is: " << streamConfig.toString() << std::endl;
 
-    // Create FrameBufferAllocator to allocate buffers from streams of a CameraConfiguration
-    std::unique_ptr<FrameBufferAllocator> allocator =
-        std::make_unique<FrameBufferAllocator>(camera);
+    // Create FrameBufferAllocator to allocate buffers for streams of a CameraConfiguration
+    FrameBufferAllocator* allocator = new FrameBufferAllocator(camera);
+    for (StreamConfiguration &cfg : *config) {
+        if (allocator->allocate(cfg.stream()) < 0) {
+            std::cerr << "Failed to allocate buffers" << std::endl;
+            return -6;
+        }
 
-    Stream* stream = config->at(0).stream();
+        size_t allocated = allocator->buffers(cfg.stream()).size();
+        std::cout << "Allocated " << allocated << " buffers for stream" << std::endl;
+    }
+
+    // Retrieves list of frame buffers & create request vectors to submit to the camera
+    Stream* stream = streamConfig.stream();
+    const std::vector<std::unique_ptr<FrameBuffer>> &buffers = allocator->buffers(stream);
+    std::vector<std::unique_ptr<Request>> requests;
+
     std::cout << streamToString(stream) << std::endl;
 
-    // Allocate buffers for the stream
-    if (allocator->allocate(stream) < 0) {
-        std::cerr << "Failed to allocate buffers for stream." << std::endl;
-        return -6; 
+    // Fill the request vector via Request instances from the camera 
+    // & associate a buffer for each of them for the Stream
+    for (unsigned int i = 0; i < buffers.size(); i++) {
+        std::unique_ptr<Request> request = camera->createRequest();
+        if (!request) {
+            std::cerr << "Can't create request" << std::endl;
+            return -7;
+        }
+
+        const std::unique_ptr<FrameBuffer> &buffer = buffers[i];
+        if (request->addBuffer(stream, buffer.get()) < 0) {
+            std::cerr << "Failed to set buffer for request" << std::endl;
+            return -8;
+        }
+
+        requests.push_back(std::move(request));
     }
 
-    // Get the allocated buffers for the stream
-    const std::vector<std::unique_ptr<FrameBuffer>> &buffers =
-        allocator->buffers(stream);
-    if (buffers.empty()) {
-        std::cerr << "No buffers allocated" << std::endl;
-        return -7;
-    }
-
-    // Start camera & create a request to access 1st frame
-    if (camera->start() != 0) {
-        std::cerr << "Failed to start camera: " << camera->id() << std::endl;
-        return -8;
-    }
-    
-    std::unique_ptr<Request> request = camera->createRequest();
-    if (!request) {
-        std::cerr << "Failed to create request for camera: " << camera->id() << std::endl;
-        return -9;
-    }
-
-    // Add a buffer to the request
-    if (request->addBuffer(stream, buffers[0].get()) < 0) {
-        std::cerr << "Failed to add buffer to request" << std::endl;
-        return -10;
-    }
-
-    // Create request completion event
+    // Create request completion event & start camera
     camera->requestCompleted.connect(requestComplete);
 
-    // Queue the request for camera to populate with captured data
-    if (camera->queueRequest(request.get()) != 0) {
-        std::cerr << "Failed to queue request." << std::endl;
-        return -11;
+    if (camera->start() != 0) {
+        std::cerr << "Failed to start camera: " << camera->id() << std::endl;
+        return -9;
     }
-
-    // Wait until request is fullfilled
-    std::future<void> requestFuture = requestPromise.get_future();
-    requestFuture.wait();
-
-    // Acquire the 1st buffer (1st frame for still image)
-    const libcamera::FrameBuffer* buffer = buffers[0].get();
-    if (!buffer) {
-        std::cerr << "No valid buffer." << std::endl;
-        return -12;
+    
+    // Queue all previously created requests
+    for (std::unique_ptr<Request> &request : requests) {
+        if (camera->queueRequest(request.get()) != 0) {
+            std::cerr << "Failed to queue request." << std::endl;
+            return -10;
+        }
     }
-
-    // Obtain the 3 planes of YUV420: a color format that stores image data with luma
-    // at full resolution and chroma channels at half resolution
-    const auto& planes = buffer->planes();
-    if (planes.size() < 3) {
-        std::cerr << "Insufficient number of planes." << std::endl;
-        return -13;
-    }
-
-    // Access the Y, U, and V planes directly.
-    // IMPORTANT: Need to allocate buffer for all 3 frames or coloring will be messed up.
-    const libcamera::FrameBuffer::Plane& y_plane = planes[0];
-    const libcamera::FrameBuffer::Plane& u_plane = planes[1];
-    const libcamera::FrameBuffer::Plane& v_plane = planes[2];
-
-    // Calculate the total length of the YUV420 buffer
-    size_t total_length = y_plane.length + u_plane.length + v_plane.length;
-
-    // Map the entire buffer (all planes) in one shot
-    void* buffer_data = mmap(nullptr, total_length, PROT_READ, MAP_SHARED, y_plane.fd.get(), 0);
-    if (buffer_data == MAP_FAILED) {
-        std::cerr << "Failed to map memory for all planes" << std::endl;
-        return -14;
-    }
-
-    // Accessing y_data only
-    void* y_data = static_cast<uint8_t*>(buffer_data) + y_plane.offset;
-
-    // YUV420 to BGR conversion using OpenCV
-    const libcamera::Size& frameSize = config->at(0).size;
-    int width = frameSize.width;
-    int height = frameSize.height;
-
-    // OpenCV image for YUV420p data
-    cv::Mat yuv_image(height + height / 2, width, CV_8UC1, y_data);
-    cv::Mat bgr_image;
-
-    // Convert YUV420 to BGR using OpenCV
-    cv::cvtColor(yuv_image, bgr_image, cv::COLOR_YUV2BGR_I420);
-
-    // Save the image as a JPEG file
-    std::string output_filename = "captured_image.jpg";
-    bool result = cv::imwrite(output_filename, bgr_image);
-    if (result) {
-        std::cout << "Image created as " << output_filename << std::endl;
-    } else {
-        std::cerr << "Failed to create image." << std::endl;
-    }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    
     // Release resources
-    munmap(buffer_data, total_length);
     camera->stop();
     allocator->free(stream);
+    delete allocator;
     camera->release();
 
     return 0;

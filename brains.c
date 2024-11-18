@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "camera.h"  // Include the C interface header
 
-int main() {
+int main(int argc, char* arv[]) {
     // Initialize the camera
     void* cameraHandle = cameraInit();
     if (cameraHandle == NULL) {
