@@ -8,7 +8,6 @@
 #include <iostream>
 #include <sstream> // std::ostringstream
 #include <vector>
-#include <future> // For the promise event
 #include <sys/mman.h> // mmap & munmap
 #include <thread> // sleep_for
 #include <chrono>

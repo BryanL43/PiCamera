@@ -34,24 +34,28 @@ static void renderFrame(const libcamera::FrameBuffer &buffer,
         // Map the plane to memory for opencv
         MapBuffer mappedBuffer(plane);
         
+        // Display the tendered frame
+        cv::Mat frame(config.size.height, config.size.width, CV_8UC4, mappedBuffer.data());
+        cv::imshow("Camera Feed", frame);
+	    cv::waitKey(1);
+
         // Convert the XRGB888 data to CV_8UC3 for opencv
-        int width = config.size.width;
-        int height = config.size.height;
-        cv::Mat image(height, width, CV_8UC4, mappedBuffer.data());
+        // int width = config.size.width;
+        // int height = config.size.height;
+        // cv::Mat image(height, width, CV_8UC4, mappedBuffer.data());
 
-        // Convert the XRGB888 to BGR
-        cv::Mat bgr_image;
-        cv::cvtColor(image, bgr_image, cv::COLOR_RGB2BGR);
+        // // Convert the XRGB888 to BGR
+        // cv::Mat bgr_image;
+        // cv::cvtColor(image, bgr_image, cv::COLOR_RGB2BGR);
 
-        // Save the image as a JPEG file
-        std::string output_filename = "captured_image.jpg";
-        bool result = cv::imwrite(output_filename, bgr_image);
-        if (result) {
-            std::cout << "Image saved as " << output_filename << std::endl;
-        } else {
-            std::cerr << "Failed to save image." << std::endl;
-        }
-
+        // // Save the image as a JPEG file
+        // std::string output_filename = "captured_image.jpg";
+        // bool result = cv::imwrite(output_filename, bgr_image);
+        // if (result) {
+        //     std::cout << "Image saved as " << output_filename << std::endl;
+        // } else {
+        //     std::cerr << "Failed to save image." << std::endl;
+        // }
     } catch (const std::exception &e) {
         std::cerr << "Error rendering frame: " << e.what() << std::endl;
     }
@@ -80,6 +84,16 @@ static void requestComplete(libcamera::Request* request) {
     //
     request->reuse(libcamera::Request::ReuseBuffers);
     camera->queueRequest(request);
+}
+
+// Queue requests
+void queueRequests(const std::vector<std::unique_ptr<Request>>& requests) {
+    for (const auto& request : requests) {
+        if (camera->queueRequest(request.get()) != 0) {
+            std::cerr << "Failed to queue request." << std::endl;
+            return;
+        }
+    }
 }
 
 // Camera initialization
@@ -119,7 +133,7 @@ int captureFrame(void* cmHandle) {
 
     // Create configuration profile for the camera
     const std::unique_ptr<CameraConfiguration> config =
-        camera->generateConfiguration({ StreamRole::VideoRecording });
+        camera->generateConfiguration({ StreamRole::Raw });
     if (!config) {
         std::cerr << "Failed to create config profile for camera: " << camera->id() << std::endl;
         return -4;
@@ -181,18 +195,17 @@ int captureFrame(void* cmHandle) {
         std::cerr << "Failed to start camera: " << camera->id() << std::endl;
         return -9;
     }
-    
-    // Queue all previously created requests
-    for (std::unique_ptr<Request> &request : requests) {
-        if (camera->queueRequest(request.get()) != 0) {
-            std::cerr << "Failed to queue request." << std::endl;
-            return -10;
-        }
+
+    // Start camera and queue all previously created requests
+    for (std::unique_ptr<libcamera::Request> &request : requests) {
+        queueRequests(requests);
+        while (1) { ; } 
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-    
-    // Release resources
-    camera->stop();
+
+    // Stop camera
+    if (camera->stop() != 0) {
+        std::cerr << "Failed to stop camera" << std::endl;
+    }
     allocator->free(stream);
     delete allocator;
     camera->release();
