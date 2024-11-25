@@ -9,7 +9,7 @@ LIBS = -lbcm2835 -lm -lstdc++ -lcamera -lcamera-base -lopencv_core -lopencv_imgc
 OUTDIR = out
 
 # Object files & output file name
-OBJECTS = $(OUTDIR)/brains.o $(OUTDIR)/camera.o
+OBJECTS = $(OUTDIR)/brains.o $(OUTDIR)/CameraSensor.o
 TARGET = waymore
 
 # Default target
@@ -25,9 +25,9 @@ $(OUTDIR)/brains.o: brains.c
 	$(CC) -c brains.c -o $(OUTDIR)/brains.o $(CFLAGS)
 
 # Compile C++ file
-$(OUTDIR)/camera.o: camera/camera.cpp
+$(OUTDIR)/CameraSensor.o: camera/CameraSensor.cpp
 	@mkdir -p $(OUTDIR)
-	$(CXX) -c camera/camera.cpp -o $(OUTDIR)/camera.o $(CXXFLAGS)
+	$(CXX) -c camera/CameraSensor.cpp -o $(OUTDIR)/CameraSensor.o $(CXXFLAGS)
 
 run: $(TARGET)
 	./$(TARGET)

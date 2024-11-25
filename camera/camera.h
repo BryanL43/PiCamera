@@ -1,22 +1,12 @@
 #ifndef _CAMERA_H
 #define _CAMERA_H
 
-#include <stdint.h> // uint8_t
+#include <stdint.h> // uint8_t, uint_fast32_t
+#include <stdlib.h> // EXIT_FAILURE
 #include <stddef.h> // size_t
 
 #ifdef __cplusplus
-#include <iostream>
-#include <sstream> // std::ostringstream
-#include <vector>
-#include <sys/mman.h> // mmap & munmap
-#include <thread> // sleep_for
-#include <chrono>
-#include <libcamera/libcamera.h>
-#include <opencv2/opencv.hpp>
-
 #include "MapBuffer.h"
-
-using namespace libcamera;
 
 extern "C" {
 #endif
