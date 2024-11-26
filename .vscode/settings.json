@@ -83,7 +83,8 @@
         "xlocmon": "cpp",
         "xlocnum": "cpp",
         "xloctime": "cpp",
-        "xtr1common": "cpp"
+        "xtr1common": "cpp",
+        "camera.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

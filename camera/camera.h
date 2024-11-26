@@ -6,14 +6,14 @@
 #include <stddef.h> // size_t
 
 #ifdef __cplusplus
-#include "MapBuffer.h"
-
 extern "C" {
 #endif
 
-void* cameraInit();
-int captureFrame(void* cmHandle);
-void cameraTerminate(void* cmHandle);
+typedef void CameraHandle; // Intermediate for C compatibility
+
+CameraHandle* cameraInit(); // void indicate fatal error
+void runCamera(CameraHandle* handle);
+void cameraTerminate(CameraHandle* handle);
 
 #ifdef __cplusplus
 }

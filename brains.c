@@ -1,27 +1,29 @@
 #include <stdio.h>
-#include "camera.h"  // Include the C interface header
+#include <stdlib.h>
+#include <signal.h>
+#include "camera/camera.h"
 
-int main(int argc, char* arv[]) {
-    // Initialize the camera
-    void* cameraHandle = cameraInit();
-    if (cameraHandle == NULL) {
-        fprintf(stderr, "Failed to initialize the camera.\n");
-        return -1;
+CameraHandle* camera = NULL;
+
+void stopHandler(int signal) {
+    if (camera) {
+        printf("\nReceived SIGTSTP, terminating the camera...\n");
+        cameraTerminate(camera);
+        printf("Camera terminated successfully.\n");
+    }
+    exit(EXIT_SUCCESS);
+}
+
+int main(int argc, char* argv[]) {
+    signal(SIGINT, stopHandler);
+
+    camera = cameraInit();
+    if (!camera) {
+        return EXIT_FAILURE;
     }
     printf("Camera initialized successfully.\n");
 
-    // Capture a live frame
-    int result = captureFrame(cameraHandle);
-    if (result != 0) {
-        fprintf(stderr, "Failed to capture a frame. Error code: %d\n", result);
-        cameraTerminate(cameraHandle);
-        return -1;
-    }
-    printf("Frame captured successfully.\n");
+    runCamera(camera);
 
-    // Terminate the camera
-    cameraTerminate(cameraHandle);
-    printf("Camera terminated successfully.\n");
-
-    return 0;
+    return EXIT_SUCCESS;
 }

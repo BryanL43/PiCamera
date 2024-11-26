@@ -7,23 +7,13 @@
 #include <sys/mman.h> // mmap & munmap
 #include <thread> // sleep_for
 #include <chrono>
+#include <mutex> // std::mutex & std::lock_guard
+#include <condition_variable> // std::condition_variable & std::unique_lock
+
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
 
 class CameraSensor {
-private:
-    std::shared_ptr<Camera> camera;
-    std::unique_ptr<CameraManager> cameraManager;
-    std::unique_ptr<CameraConfiguration> config;
-    std::unique_ptr<FrameBufferAllocator> allocator;
-    std::vector<std::unique_ptr<Request>> requests;
-    std::map<Stream*, std::queue<FrameBuffer*>> frameBuffers; // Pair that formulate each image
-    std::map<FrameBuffer*, std::vector<libcamera::Span<uint8_t>>> mappedBuffers;
-
-    void makeRequests();
-    void requestComplete(Request* request);
-    std::vector<libcamera::Span<uint8_t>> getMappedBuffer(FrameBuffer* buffer);
-
 public:
     using Camera = libcamera::Camera;
     using CameraManager = libcamera::CameraManager;
@@ -40,12 +30,31 @@ public:
     CameraSensor(); // Holds initializating steps
     ~CameraSensor();
 
-    void configCamera(const uint_fast32_t width, const uint_fast32_t height,
+    int configCamera(const uint_fast32_t width, const uint_fast32_t height,
                     const PixelFormat pixelFormat, const StreamRole role);
     void startCamera();
     void stopCamera();
+    void renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buffer);
 
-    void renderFrame(cv::Mat &frame, const libcamera::FrameBuffer &buffer);
-}
+private:
+    std::shared_ptr<Camera> camera;
+    std::unique_ptr<CameraManager> cameraManager;
+    std::unique_ptr<CameraConfiguration> config;
+    std::unique_ptr<FrameBufferAllocator> allocator;
+    std::vector<std::unique_ptr<Request>> requests;
+
+    // House the Span (mapped memory: 1st param = region offset of file; 2nd param = size)
+    std::map<FrameBuffer*, std::vector<libcamera::Span<uint8_t>>> mappedBuffers;
+
+    // Pair that formulate each image
+    std::map<Stream*, std::queue<FrameBuffer*>> frameBuffers;
+
+    bool running = false;
+    std::mutex mtx;
+    std::condition_variable cv;
+
+    void sendRequests();
+    void requestComplete(Request* request);
+};
 
 #endif
