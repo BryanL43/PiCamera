@@ -6,6 +6,7 @@ CameraHandle* cameraInit() {
     
     // Configure camera with desired dimension, color format, & type of stream
     // All pixel format: https://libcamera.org/api-html/formats_8h_source.html
+    // WARNING: OpenCV takes only RGB type format. YUV420, etc will require additional conversion
     const uint_fast32_t width = 640;
     const uint_fast32_t height = 480;
     const libcamera::PixelFormat pixelFormat = libcamera::formats::XRGB8888;

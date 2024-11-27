@@ -39,7 +39,6 @@ int main(int argc, char* argv[]) {
     // Simulate an application event loop or wait for the signal
     while (running) {
         usleep(100000); // 100ms
-        printf("Running\n");
     }
 
     // Clean up

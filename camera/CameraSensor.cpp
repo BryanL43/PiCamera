@@ -155,7 +155,7 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
 
     try {
         // Find the mapped buffer associated with the given FrameBuffer
-        auto item = mappedBuffers.find(const_cast<libcamera::FrameBuffer*>(buffer));
+        auto item = mappedBuffers.find(const_cast<libcamera::FrameBuffer *>(buffer));
         if (item == mappedBuffers.end()) {
             std::cerr << "Mapped buffer not found, cannot display frame" << std::endl;
             return;
@@ -164,8 +164,7 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
         // Retrieve the mapped buffer
         const std::vector<libcamera::Span<uint8_t>> &retrievedBuffers = item->second;
         if (retrievedBuffers.empty() || retrievedBuffers[0].data() == nullptr) {
-            std::cerr << 
-                "Mapped buffer is empty or data is null, cannot display frame" << std::endl;
+            std::cerr << "Mapped buffer is empty or data is null, cannot display frame" << std::endl;
             return;
         }
 
@@ -173,10 +172,67 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
         frame = cv::Mat(streamConfig.size.height, streamConfig.size.width, CV_8UC4,
                         const_cast<uint8_t *>(retrievedBuffers[0].data()));
 
-        // Display the rendered frame
-        cv::imshow("Camera Feed", frame);
+        // Convert to grayscale
+        cv::Mat gray;
+        cv::cvtColor(frame, gray, cv::COLOR_BGRA2GRAY);
+
+        // Apply thresholding to isolate black regions
+        cv::Mat blackline;
+        cv::inRange(gray, cv::Scalar(0), cv::Scalar(75), blackline);
+
+        // Perform morphological operations to clean up the binary image
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+        cv::morphologyEx(blackline, blackline, cv::MORPH_CLOSE, kernel);
+
+        // Find contours of the black regions
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(blackline, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        // Center of the frame (camera center)
+        int frameCenterX = frame.cols / 2;
+
+        // Variables to track the closest horizontal segment
+        double closestDistance = std::numeric_limits<double>::max();
+        cv::Vec4i bestLine;
+
+        // Use Hough Line Transform for precise horizontal segment detection
+        std::vector<cv::Vec4i> lines;
+        cv::HoughLinesP(blackline, lines, 1, CV_PI / 180, 50, 50, 10);
+
+        // Find the line closest to the frame's center
+        for (const auto &line : lines) {
+            int x1 = line[0], y1 = line[1], x2 = line[2], y2 = line[3];
+
+            // Skip nearly vertical lines
+            if (std::abs(y2 - y1) < std::abs(x2 - x1)) {
+                int lineCenterX = (x1 + x2) / 2;
+                double distanceToCenter = std::abs(lineCenterX - frameCenterX);
+
+                if (distanceToCenter < closestDistance) {
+                    closestDistance = distanceToCenter;
+                    bestLine = line;
+                }
+            }
+        }
+
+        // Draw the best detected horizontal line and its center
+        if (closestDistance < std::numeric_limits<double>::max()) {
+            int x1 = bestLine[0], y1 = bestLine[1];
+            int x2 = bestLine[2], y2 = bestLine[3];
+
+            // Draw the red line spanning the horizontal width
+            cv::line(frame, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(0, 0, 255), 3);
+
+            // Compute and draw the green dot at the center
+            int centerX = (x1 + x2) / 2;
+            int centerY = (y1 + y2) / 2;
+            cv::circle(frame, cv::Point(centerX, centerY), 5, cv::Scalar(0, 255, 0), -1);
+        }
+
+        // Display the processed frame
+        cv::imshow("Frame with Detected Line and Center", frame);
         cv::waitKey(1);
     } catch (const std::exception &e) {
-        std::cerr << "Error rendering frame: " << e.what() << std::endl;
+        std::cerr << "Error during rendering: " << e.what() << std::endl;
     }
 }

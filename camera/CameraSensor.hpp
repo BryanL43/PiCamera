@@ -2,11 +2,8 @@
 #define _CAMERASENSOR_H_
 
 #include <iostream>
-#include <sstream> // std::ostringstream
 #include <queue>
 #include <sys/mman.h> // mmap & munmap
-#include <thread> // sleep_for
-#include <chrono>
 
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
