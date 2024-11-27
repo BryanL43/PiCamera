@@ -30,9 +30,6 @@ void runCamera(CameraHandle* handle) {
     try {
         std::cout << "Starting camera..." << std::endl;
         camera->startCamera();
-        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-        std::cout << "Stopping camera.." << std::endl;
-        camera->stopCamera();
     } catch (const std::exception& e) {
         std::cerr << "Camera failed to start: " << e.what() << std::endl;
         return;

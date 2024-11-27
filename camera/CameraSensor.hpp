@@ -7,8 +7,6 @@
 #include <sys/mman.h> // mmap & munmap
 #include <thread> // sleep_for
 #include <chrono>
-#include <mutex> // std::mutex & std::lock_guard
-#include <condition_variable> // std::condition_variable & std::unique_lock
 
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
@@ -33,7 +31,6 @@ public:
     int configCamera(const uint_fast32_t width, const uint_fast32_t height,
                     const PixelFormat pixelFormat, const StreamRole role);
     void startCamera();
-    void stopCamera();
     void renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buffer);
 
 private:
@@ -48,10 +45,6 @@ private:
 
     // Pair that formulate each image
     std::map<Stream*, std::queue<FrameBuffer*>> frameBuffers;
-
-    bool running = false;
-    std::mutex mtx;
-    std::condition_variable cv;
 
     void sendRequests();
     void requestComplete(Request* request);

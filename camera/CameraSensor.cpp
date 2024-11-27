@@ -28,43 +28,17 @@ CameraSensor::~CameraSensor() {
     camera->release();
     camera.reset();
     cameraManager->stop();
+    cv::destroyWindow("Camera Feed");
 }
 
 void CameraSensor::startCamera() {
-    {
-        std::lock_guard<std::mutex> lock(mtx);
-        running = true;
-    }
-
     sendRequests();
     camera->requestCompleted.connect(this, &CameraSensor::requestComplete);
     camera->start();
     for (std::unique_ptr<Request>& request : requests) {
         camera->queueRequest(request.get());
     }
-
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx);
-        if (!running) {
-            break;
-        }
-        cv.wait(lock);
-    }
-
-    std::cout << "Camera stopped." << std::endl;
 }
-
-void CameraSensor::stopCamera() {
-    {
-        std::lock_guard<std::mutex> lock(mtx);
-        running = false;
-    }
-
-    cv.notify_one(); 
-    camera->stop();
-    camera->release();
-}
-
 
 int CameraSensor::configCamera(const uint_fast32_t width, const uint_fast32_t height,
                                 const PixelFormat pixelFormat, const StreamRole role) {
