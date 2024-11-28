@@ -155,13 +155,13 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
 
     try {
         // Find the mapped buffer associated with the given FrameBuffer
-        auto item = mappedBuffers.find(const_cast<libcamera::FrameBuffer *>(buffer));
+        auto item = mappedBuffers.find(const_cast<libcamera::FrameBuffer*>(buffer));
         if (item == mappedBuffers.end()) {
             std::cerr << "Mapped buffer not found, cannot display frame" << std::endl;
             return;
         }
 
-        // Retrieve the mapped buffer
+        // Retrieve the pre-mapped buffer
         const std::vector<libcamera::Span<uint8_t>> &retrievedBuffers = item->second;
         if (retrievedBuffers.empty() || retrievedBuffers[0].data() == nullptr) {
             std::cerr << "Mapped buffer is empty or data is null, cannot display frame" << std::endl;
@@ -170,69 +170,97 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
 
         // Directly create an OpenCV Mat from the mapped buffer
         frame = cv::Mat(streamConfig.size.height, streamConfig.size.width, CV_8UC4,
-                        const_cast<uint8_t *>(retrievedBuffers[0].data()));
+                        const_cast<uint8_t*>(retrievedBuffers[0].data()));
 
         // Convert to grayscale
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGRA2GRAY);
 
-        // Apply thresholding to isolate black regions
-        cv::Mat blackline;
-        cv::inRange(gray, cv::Scalar(0), cv::Scalar(75), blackline);
+        // Preprocess the grayscale image: Gaussian blur to reduce noise
+        cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
 
-        // Perform morphological operations to clean up the binary image
-        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-        cv::morphologyEx(blackline, blackline, cv::MORPH_CLOSE, kernel);
+        // Calculate a dynamic threshold based on the mean intensity of the image.
+        // This helps reduce sensitivity to shadows. Larger threshold = less sensitive.
+        double meanIntensity = cv::mean(gray)[0];
+        int thresholdValue = static_cast<int>(meanIntensity * 0.95);
+        if (thresholdValue < 90) thresholdValue = 90;
+        if (thresholdValue > 170) thresholdValue = 170;
 
-        // Find contours of the black regions
+        // Apply threshold to the image
+        cv::Mat thresh;
+        cv::threshold(gray, thresh, thresholdValue, 255, cv::THRESH_BINARY_INV);
+
+        // Apply morphological closing to clean up noise and fill small gaps
+        cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, cv::Mat(), cv::Point(-1, -1), 2);
+
+        // Find contours
         std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(blackline, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        cv::findContours(thresh, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
-        // Center of the frame (camera center)
-        int frameCenterX = frame.cols / 2;
+        // Store the main contour and its center
+        static std::vector<cv::Point> prevMainContour;
+        static int prevContourCenterX = 0;
+        std::vector<cv::Point> mainContour;
+        int contourCenterX = 0;
 
-        // Variables to track the closest horizontal segment
-        double closestDistance = std::numeric_limits<double>::max();
-        cv::Vec4i bestLine;
-
-        // Use Hough Line Transform for precise horizontal segment detection
-        std::vector<cv::Vec4i> lines;
-        cv::HoughLinesP(blackline, lines, 1, CV_PI / 180, 50, 50, 10);
-
-        // Find the line closest to the frame's center
-        for (const auto &line : lines) {
-            int x1 = line[0], y1 = line[1], x2 = line[2], y2 = line[3];
-
-            // Skip nearly vertical lines
-            if (std::abs(y2 - y1) < std::abs(x2 - x1)) {
-                int lineCenterX = (x1 + x2) / 2;
-                double distanceToCenter = std::abs(lineCenterX - frameCenterX);
-
-                if (distanceToCenter < closestDistance) {
-                    closestDistance = distanceToCenter;
-                    bestLine = line;
+        // Identify the largest contour by area
+        if (!contours.empty()) {
+            mainContour = *std::max_element(contours.begin(), contours.end(),
+                [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b) {
+                    return cv::contourArea(a) < cv::contourArea(b);
                 }
+            );
+
+            // Compute contour center using moments
+            cv::Moments M = cv::moments(mainContour);
+            if (M.m00 != 0) {
+                contourCenterX = static_cast<int>(M.m10 / M.m00);
+                int contourCenterY = static_cast<int>(M.m01 / M.m00);
+
+                // Correct contour if needed
+                if (std::abs(prevContourCenterX - contourCenterX) > 5) {
+                    for (const auto &contour : contours) {
+                        cv::Moments tmpM = cv::moments(contour);
+                        if (tmpM.m00 != 0) {
+                            int tmpContourCenterX = static_cast<int>(tmpM.m10 / tmpM.m00);
+                            if (std::abs(tmpContourCenterX - prevContourCenterX) < 5) {
+                                mainContour = contour;
+                                contourCenterX = tmpContourCenterX;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Update previous contour values
+                prevMainContour = mainContour;
+                prevContourCenterX = contourCenterX;
+
+                // Calculate the middle of the frame
+                int middleX = frame.cols / 2;
+                int middleY = frame.rows / 2;
+
+                // Draw the contour and center points
+                cv::drawContours(frame, std::vector<std::vector<cv::Point>>{mainContour}, -1, cv::Scalar(0, 255, 0), 3); // Green contour
+                cv::circle(frame, cv::Point(contourCenterX, middleY), 7, cv::Scalar(255, 255, 255), -1); // White center dot
+                cv::circle(frame, cv::Point(middleX, middleY), 3, cv::Scalar(0, 0, 255), -1); // Red dot for camera center
+
+                // Display the distance and extent
+                std::string distanceText = std::to_string(middleX - contourCenterX);
+                double extent = cv::contourArea(mainContour) / (cv::boundingRect(mainContour).area());
+                std::string extentText = "Weight: " + std::to_string(extent);
+
+                cv::putText(frame, distanceText, cv::Point(contourCenterX + 20, middleY),
+                            cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(200, 0, 200), 2);
+                cv::putText(frame, extentText, cv::Point(contourCenterX + 20, middleY + 35),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 0, 200), 1);
             }
         }
 
-        // Draw the best detected horizontal line and its center
-        if (closestDistance < std::numeric_limits<double>::max()) {
-            int x1 = bestLine[0], y1 = bestLine[1];
-            int x2 = bestLine[2], y2 = bestLine[3];
-
-            // Draw the red line spanning the horizontal width
-            cv::line(frame, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(0, 0, 255), 3);
-
-            // Compute and draw the green dot at the center
-            int centerX = (x1 + x2) / 2;
-            int centerY = (y1 + y2) / 2;
-            cv::circle(frame, cv::Point(centerX, centerY), 5, cv::Scalar(0, 255, 0), -1);
-        }
-
-        // Display the processed frame
-        cv::imshow("Frame with Detected Line and Center", frame);
+        cv::imshow("Camera Feed", frame);
         cv::waitKey(1);
+
     } catch (const std::exception &e) {
-        std::cerr << "Error during rendering: " << e.what() << std::endl;
+        std::cerr << "Error rendering frame: " << e.what() << std::endl;
     }
 }
