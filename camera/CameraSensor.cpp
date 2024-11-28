@@ -168,7 +168,7 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
             return;
         }
 
-        // Directly create an OpenCV Mat from the mapped buffer
+        // Create an OpenCV Mat from the mapped buffer
         frame = cv::Mat(streamConfig.size.height, streamConfig.size.width, CV_8UC4,
                         const_cast<uint8_t*>(retrievedBuffers[0].data()));
 
@@ -186,77 +186,83 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
         if (thresholdValue < 90) thresholdValue = 90;
         if (thresholdValue > 170) thresholdValue = 170;
 
-        // Apply threshold to the image
-        cv::Mat thresh;
-        cv::threshold(gray, thresh, thresholdValue, 255, cv::THRESH_BINARY_INV);
+        // Define slicing parameters to segment the image & black line
+        int slices = 4;
+        int sliceHeight = gray.rows / slices;
 
-        // Apply morphological closing to clean up noise and fill small gaps
-        cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, cv::Mat(), cv::Point(-1, -1), 2);
+        std::vector<int> sliceDirections(slices, 0); // Store directions per slice
+        std::vector<cv::Point> contourCenters; // To store the centers of the contours
+        for (int i = 0; i < slices; ++i) {
+            int startY = i * sliceHeight;
+            cv::Rect sliceROI(0, startY, gray.cols, sliceHeight);
+            cv::Mat slice = gray(sliceROI);
 
-        // Find contours
-        std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(thresh, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+            // Apply threshold & morphological closing to clean up noise and fill small gaps
+            cv::Mat thresh;
+            cv::threshold(slice, thresh, thresholdValue, 255, cv::THRESH_BINARY_INV);
+            cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, cv::Mat(), cv::Point(-1, -1), 2);
 
-        // Store the main contour and its center
-        static std::vector<cv::Point> prevMainContour;
-        static int prevContourCenterX = 0;
-        std::vector<cv::Point> mainContour;
-        int contourCenterX = 0;
+            // Find contours
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(thresh, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
-        // Identify the largest contour by area
-        if (!contours.empty()) {
-            mainContour = *std::max_element(contours.begin(), contours.end(),
-                [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b) {
-                    return cv::contourArea(a) < cv::contourArea(b);
-                }
-            );
-
-            // Compute contour center using moments
-            cv::Moments M = cv::moments(mainContour);
-            if (M.m00 != 0) {
-                contourCenterX = static_cast<int>(M.m10 / M.m00);
-                int contourCenterY = static_cast<int>(M.m01 / M.m00);
-
-                // Correct contour if needed
-                if (std::abs(prevContourCenterX - contourCenterX) > 5) {
-                    for (const auto &contour : contours) {
-                        cv::Moments tmpM = cv::moments(contour);
-                        if (tmpM.m00 != 0) {
-                            int tmpContourCenterX = static_cast<int>(tmpM.m10 / tmpM.m00);
-                            if (std::abs(tmpContourCenterX - prevContourCenterX) < 5) {
-                                mainContour = contour;
-                                contourCenterX = tmpContourCenterX;
-                                break;
-                            }
-                        }
+            if (!contours.empty()) {
+                // Find the largest contour by area
+                auto mainContour = *std::max_element(contours.begin(), contours.end(),
+                    [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b) {
+                        return cv::contourArea(a) < cv::contourArea(b);
                     }
-                }
+                );
 
-                // Update previous contour values
-                prevMainContour = mainContour;
-                prevContourCenterX = contourCenterX;
+                // Compute the segment's contour center
+                cv::Moments M = cv::moments(mainContour);
+                int contourCenterX = (M.m00 != 0) ? static_cast<int>(M.m10 / M.m00) : 0;
+                contourCenters.push_back(cv::Point(contourCenterX, sliceHeight / 2 + startY));
 
-                // Calculate the middle of the frame
-                int middleX = frame.cols / 2;
-                int middleY = frame.rows / 2;
+                // Compute direction (middle of the slice - contour center)
+                int sliceMiddleX = slice.cols / 2;
+                int direction = (sliceMiddleX - contourCenterX) * (cv::contourArea(mainContour) / (cv::boundingRect(mainContour).area()));
+                sliceDirections[i] = direction;
 
-                // Draw the contour and center points
-                cv::drawContours(frame, std::vector<std::vector<cv::Point>>{mainContour}, -1, cv::Scalar(0, 255, 0), 3); // Green contour
-                cv::circle(frame, cv::Point(contourCenterX, middleY), 7, cv::Scalar(255, 255, 255), -1); // White center dot
-                cv::circle(frame, cv::Point(middleX, middleY), 3, cv::Scalar(0, 0, 255), -1); // Red dot for camera center
+                // Draw the Green contour and white center dot (the center of the contour)
+                cv::drawContours(frame(sliceROI), std::vector<std::vector<cv::Point>>{mainContour}, -1, cv::Scalar(0, 255, 0), 2);
+                cv::circle(frame(sliceROI), cv::Point(contourCenterX, sliceHeight / 2), 5, cv::Scalar(255, 255, 255), -1);
 
-                // Display the distance and extent
-                std::string distanceText = std::to_string(middleX - contourCenterX);
+                // Calculate distance and extent
+                std::string distanceText = "Dist: " + std::to_string(sliceMiddleX - contourCenterX);
                 double extent = cv::contourArea(mainContour) / (cv::boundingRect(mainContour).area());
                 std::string extentText = "Weight: " + std::to_string(extent);
 
-                cv::putText(frame, distanceText, cv::Point(contourCenterX + 20, middleY),
+                // Display distance and extent
+                cv::putText(frame(sliceROI), distanceText, cv::Point(contourCenterX + 20, sliceHeight / 2),
                             cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(200, 0, 200), 2);
-                cv::putText(frame, extentText, cv::Point(contourCenterX + 20, middleY + 35),
+                cv::putText(frame(sliceROI), extentText, cv::Point(contourCenterX + 20, sliceHeight / 2 + 35),
                             cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 0, 200), 1);
+            }
+
+            // Draw a red dot at the center of each slice for camera center
+            int sliceMiddleX = slice.cols / 2;
+            int sliceMiddleY = sliceHeight / 2 + startY;
+            cv::circle(frame, cv::Point(sliceMiddleX, sliceMiddleY), 5, cv::Scalar(0, 0, 255), -1);
+
+            // Draw a pink horizontal line connecting the white dot to the red dot
+            if (!contourCenters.empty()) {
+                cv::Point whiteDot = contourCenters.back(); // Last contour center
+                cv::line(frame, whiteDot, cv::Point(sliceMiddleX, whiteDot.y), cv::Scalar(255, 20, 147), 2);
             }
         }
 
+        // Draw blue lines connecting each white dot
+        for (size_t i = 1; i < contourCenters.size(); ++i) {
+            cv::line(frame, contourCenters[i-1], contourCenters[i], cv::Scalar(255, 0, 0), 2, cv::LINE_8, 0);
+        }
+
+        // Draw blue line from the first to the last white dot
+        if (contourCenters.size() > 1) {
+            cv::line(frame, contourCenters.front(), contourCenters.back(), cv::Scalar(255, 0, 0), 2, cv::LINE_8, 0);
+        }
+
+        // Display the final result
         cv::imshow("Camera Feed", frame);
         cv::waitKey(1);
 
