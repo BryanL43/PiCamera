@@ -38,7 +38,13 @@ int main(int argc, char* argv[]) {
 
     // Simulate an application event loop or wait for the signal
     while (running) {
-        usleep(100000); // 100ms
+        // Example use of retrieving array of distances.
+        // Ideally access via for loop rather than direct index due to image slice
+        // being a parameter
+        // int* distances = getLineDistances(camera); // Retrieve the distances array
+        // printf("Last index value: %d\n", distances[4]);
+        
+        usleep(100); // 100ms
     }
 
     // Clean up

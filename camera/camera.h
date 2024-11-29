@@ -13,6 +13,7 @@ typedef void CameraHandle; // Intermediate for C compatibility
 
 CameraHandle* cameraInit(); // void indicate fatal error
 void runCamera(CameraHandle* handle);
+int* getLineDistances(CameraHandle* handle);
 void cameraTerminate(CameraHandle* handle);
 
 #ifdef __cplusplus

@@ -37,6 +37,16 @@ void runCamera(CameraHandle* handle) {
     }
 }
 
+int* getLineDistances(CameraHandle* handle) {
+    if (!handle) {
+        std::cerr << "No camera handle found" << std::endl;
+        return NULL;
+    }
+
+    CameraSensor* camera = static_cast<CameraSensor*>(handle);
+    return camera->getDistances();
+} 
+
 void cameraTerminate(CameraHandle* handle) {
     if (!handle) {
         std::cerr << "Camera handle is null!" << std::endl;

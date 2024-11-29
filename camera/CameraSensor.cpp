@@ -23,7 +23,7 @@ CameraSensor::CameraSensor() {
     std::cout << "Acquired camera: " << camera->id() << std::endl;
 
     // Create & config frame processor
-    frameProcessor = std::make_unique<FrameProcessor>(4, 0.95, 90, 170, true);
+    frameProcessor = std::make_unique<FrameProcessor>(5, 0.95, 90, 170, true);
 }
 
 CameraSensor::~CameraSensor() {
@@ -175,4 +175,26 @@ void CameraSensor::renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buf
     } catch (const std::exception &e) {
         std::cerr << "Error rendering frame: " << e.what() << std::endl;
     }
+}
+
+int* CameraSensor::getDistances() {
+    if (!frameProcessor) {
+        std::cerr << "FrameProcessor is not initialized." << std::endl;
+        return nullptr;
+    }
+
+    // Get a thread-safe copy of distances from the FrameProcessor
+    int* acquiredDistances = frameProcessor->getDistances();
+    if (!acquiredDistances) {
+        std::cerr << "Failed to acquire distances from FrameProcessor." << std::endl;
+        return nullptr;
+    }
+
+    // Create a new copy of the distances to return
+    int slices = frameProcessor->getSlices();
+    int* distancesCopy = new int[slices];
+    std::copy(acquiredDistances, acquiredDistances + slices, distancesCopy);
+
+    delete[] acquiredDistances;
+    return distancesCopy;
 }

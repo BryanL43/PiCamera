@@ -30,6 +30,7 @@ public:
     int configCamera(const uint_fast32_t width, const uint_fast32_t height,
                     const PixelFormat pixelFormat, const StreamRole role);
     void startCamera();
+    int* getDistances();
 
 private:
     std::shared_ptr<Camera> camera;

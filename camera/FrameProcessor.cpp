@@ -2,10 +2,17 @@
 
 FrameProcessor::FrameProcessor(int numOfSlices, double meanIntensityMult,
                                int minThreshold, int maxThreshold, bool debug)
-    : slices(numOfSlices), meanIntensityMult(meanIntensityMult),
-      minThreshold(minThreshold), maxThreshold(maxThreshold), debugMode(debug) {}
+    : slices(numOfSlices),
+      meanIntensityMult(meanIntensityMult),
+      minThreshold(minThreshold),
+      maxThreshold(maxThreshold),
+      debugMode(debug) {
+    // Allocate the return distance array
+    distances = new int[slices]{};
+}
 
 FrameProcessor::~FrameProcessor() {
+    delete[] distances;
     cv::destroyWindow("Camera Feed");
 }
 
@@ -90,14 +97,17 @@ cv::Point FrameProcessor::processSlice(cv::Mat &slice, int sliceIndex, cv::Mat &
     int contourCenterX = (M.m00 != 0) ? static_cast<int>(M.m10 / M.m00) : slice.cols / 2;
     int contourCenterY = sliceHeight / 2;
 
+    // Calculate distance from the center of the slice to the contour's center
+    int sliceMiddleX = slice.cols / 2;
+    int distance = sliceMiddleX - contourCenterX;
+
+    // Calculate extent of the contour
+    double extent = cv::contourArea(mainContour) / static_cast<double>(cv::boundingRect(mainContour).area());
+
+    // Add the calculated distance to the return array
+    distances[sliceIndex] = distance;
+
     if (debugMode) {
-        // Calculate distance from the center of the slice to the contour's center
-        int sliceMiddleX = slice.cols / 2;
-        int distance = sliceMiddleX - contourCenterX;
-
-        // Calculate extent of the contour
-        double extent = cv::contourArea(mainContour) / static_cast<double>(cv::boundingRect(mainContour).area());
-
         // Draw the green contour and white center dot
         cv::Rect sliceROI(0, sliceIndex * sliceHeight, slice.cols, sliceHeight);
         cv::drawContours(frame(sliceROI), std::vector<std::vector<cv::Point>>{mainContour}, -1, cv::Scalar(0, 255, 0), 2);
@@ -114,4 +124,17 @@ cv::Point FrameProcessor::processSlice(cv::Mat &slice, int sliceIndex, cv::Mat &
 
     // Return the center of the contour
     return cv::Point(contourCenterX, contourCenterY + sliceIndex * sliceHeight);
+}
+
+int* FrameProcessor::getDistances() const {
+    // Mutex automatically unlocks on end of scope
+    std::lock_guard<std::mutex> lock(distancesMutex);
+
+    int* copy = new int[slices];
+    std::copy(distances, distances + slices, copy);
+    return copy;
+}
+
+int FrameProcessor::getSlices() {
+    return this->slices;
 }
