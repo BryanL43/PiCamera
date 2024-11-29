@@ -8,6 +8,8 @@
 #include <libcamera/libcamera.h>
 #include <opencv2/opencv.hpp>
 
+#include "FrameProcessor.hpp"
+
 class CameraSensor {
 public:
     using Camera = libcamera::Camera;
@@ -22,13 +24,12 @@ public:
     using FrameMetadata = libcamera::FrameMetadata;
     using Request = libcamera::Request;
 
-    CameraSensor(); // Holds initializating steps
+    CameraSensor(); // Holds initializating steps for the camera
     ~CameraSensor();
 
     int configCamera(const uint_fast32_t width, const uint_fast32_t height,
                     const PixelFormat pixelFormat, const StreamRole role);
     void startCamera();
-    void renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buffer);
 
 private:
     std::shared_ptr<Camera> camera;
@@ -43,8 +44,12 @@ private:
     // Pair that formulate each image
     std::map<Stream*, std::queue<FrameBuffer*>> frameBuffers;
 
+    // Modularize frame processing event
+    std::unique_ptr<FrameProcessor> frameProcessor;
+
     void sendRequests();
     void requestComplete(Request* request);
+    void renderFrame(cv::Mat &frame, const libcamera::FrameBuffer *buffer);
 };
 
 #endif
